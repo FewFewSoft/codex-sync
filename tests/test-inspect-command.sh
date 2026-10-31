@@ -63,7 +63,7 @@ reject ignore
 run inspect --help
 grep -Fq 'codex-sync inspect' "$tmp/out"
 run inspect --version
-[[ $(cat "$tmp/out") == 'codex-sync 0.1.0' ]]
+[[ $(cat "$tmp/out") == "$("$repo/bin/codex-sync" --version)" ]]
 # Empty sources still have headers; comments are not effective rules.
 printf '# comment\n; comment\n\r\n' >"$marker"
 local_report

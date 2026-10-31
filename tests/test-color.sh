@@ -25,6 +25,10 @@ case $COLOR_CASE in
 warning) exec "$COLOR_COMMAND" push >"$COLOR_STDOUT" ;;
 error) exec "$COLOR_COMMAND" invalid >"$COLOR_STDOUT" ;;
 inspect) exec "$COLOR_COMMAND" inspect ;;
+inspect-no-color) exec "$COLOR_COMMAND" inspect --no-color ;;
+warning-no-color) exec "$COLOR_COMMAND" push --no-color >"$COLOR_STDOUT" ;;
+progress) exec "$COLOR_COMMAND" push ;;
+verbose) exec "$COLOR_COMMAND" push -v ;;
 inspect-redirected) exec "$COLOR_COMMAND" inspect >"$COLOR_STDOUT" ;;
 redirected) exec "$COLOR_COMMAND" push 2>"$COLOR_STDERR" ;;
 esac
@@ -51,7 +55,15 @@ unset NO_COLOR
 terminal redirected
 [[ $(cat "$tmp/stderr") != *"$escape"* ]]
 [[ $(cat "$tmp/terminal") != *"$escape"* ]]
-ok 'NO_COLOR including empty values and redirected stderr disable color'
+terminal warning-no-color
+[[ $(cat "$tmp/terminal") != *"$escape"* ]]
+terminal inspect-no-color
+[[ $(cat "$tmp/terminal") != *"$escape"* ]]
+terminal progress
+has --info=progress2
+terminal verbose
+if has --info=progress2; then exit 1; fi
+ok 'NO_COLOR, --no-color and redirection disable color; terminal progress respects verbose'
 
 # Compare the whole terminal report to plain output with label and status escapes added.
 for state in active absent disabled; do
@@ -84,6 +96,7 @@ ok 'inspect bolds only labels and colors [disabled] on terminal stdout; NO_COLOR
 # External output must pass through verbatim, including its own escape codes.
 cat >"$tmp/mock/rsync" <<'MOCK'
 #!/usr/bin/env bash
+for arg in "$@"; do [[ $arg != --dry-run ]] || exit 0; done
 printf 'rsync stdout\033[35munchanged\033[0m\n'
 printf 'rsync stderr\033[36munchanged\033[0m\n' >&2
 MOCK
@@ -92,7 +105,7 @@ cat >"$tmp/mock/ssh" <<'MOCK'
 printf 'ssh stdout\n'
 printf 'ssh stderr\n' >&2
 MOCK
-run push --no-delete
-[[ $(cat "$tmp/out") == $'ssh stdout\nℹ️ push: '*$'\nrsync stdout\033[35munchanged\033[0m' ]]
+run push --no-delete --force
+[[ $(cat "$tmp/out") == $'ssh stdout\nℹ️ push: '*$'\nPreview: 0 added, 0 modified, 0 deleted\nrsync stdout\033[35munchanged\033[0m' ]]
 [[ $(cat "$tmp/err") == $'ssh stderr\nrsync stderr\033[36munchanged\033[0m' ]]
 ok 'SSH and rsync output passes through unchanged'

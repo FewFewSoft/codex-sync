@@ -40,3 +40,11 @@ reject() {
 	fi
 	[[ ! -e $LOG.rsync ]]
 }
+
+# Read canonical release data without sourcing or executing the application.
+canonical_version() {
+	local -a versions
+	mapfile -t versions < <(sed -n 's/^readonly VERSION=//p' "$1")
+	[[ ${#versions[@]} == 1 && ${versions[0]} =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || return 1
+	printf '%s\n' "${versions[0]}"
+}

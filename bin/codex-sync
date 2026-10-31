@@ -2,11 +2,26 @@
 # codex-sync
 set -euo pipefail
 
+# Read as literal release data by packaging, not used as a runtime fallback.
+# shellcheck disable=SC2034
 readonly VERSION=1.2.0
+readonly BUILD_METADATA=''
+
+version_text() {
+	local metadata=$BUILD_METADATA script root
+	if [[ -z $metadata ]]; then
+		script=$(readlink -f -- "${BASH_SOURCE[0]}") || script=''
+		root=${script%/bin/codex-sync}
+		if [[ $root != "$script" && -e $root/.git && -f $root/scripts/build-metadata.sh ]]; then
+			metadata=$(bash "$root/scripts/build-metadata.sh" 2>/dev/null) || metadata=''
+		fi
+	fi
+	printf '%s' "${metadata:-?.?.?}"
+}
 
 diagnostic() {
 	local color=$1 message=$2
-	if [[ -t 2 && ! ${NO_COLOR+x} ]]; then
+	if [[ -t 2 && ! ${NO_COLOR+x} && ${color_enabled:-true} == true ]]; then
 		printf '\033[%sm%s\033[0m\n' "$color" "$message" >&2
 	else
 		printf '%s\n' "$message" >&2
@@ -17,7 +32,42 @@ fail() {
 	exit 1
 }
 usage() {
-	printf '%s\n' 'Usage: codex-sync <push|pull> [--dry-run] [--no-delete]' '       codex-sync inspect' '       codex-sync --help | --version' '' 'Sync root: directory containing the nearest .codexignore in physical cwd or parents.' 'Missing marker: interactive push/pull offers empty-file creation [y/N], then stops.' 'Git worktree root is an optional location hint; otherwise physical cwd is suggested.' 'Review sensitive files/exclusions and rerun; noninteractive commands never create it.' 'Missing remote destination: interactive push offers mkdir [y/N], then continues on success.' 'Pull never creates remote directories; dry-run reports missing destinations without creation.' 'In that file, # codex-sync: no-global-ignore disables global ignore rules.' 'inspect shows the sync root, source status and effective exclusion rules without SSH or rsync.'
+	cat <<EOF
+codex-sync $(version_text) — synchronize projects over SSH
+
+Usage: codex-sync <command> [options]
+
+Commands:
+  push               Sync local project to remote (also: cpush)
+  pull               Sync remote project to local (also: cpull)
+  inspect            Show local exclusion rules and their sources
+
+Options (push/pull):
+  -n, --dry-run      Preview changes without applying
+      --no-delete    Preserve destination-only files
+  -f, --force        Overwrite newer destination files
+  -c, --cleanup      Delete destination entries matching project ignore rules
+  -i, --interactive  Preview and confirm before applying
+  -p, --progress     Show aggregate transfer progress
+      --no-progress  Disable progress
+  -q, --quiet        Suppress status, preview and progress
+  -v, --verbose      Show verbose rsync output
+
+General options:
+      --no-color     Disable terminal colors
+  -h, --help         Show this help (use --help at top level)
+      --version      Show version
+
+By default, sync preserves newer files and deletes destination-only files.
+Every sync previews changes first, then applies automatically unless -i or -n.
+See README.md for setup and safety.
+
+Examples:
+  codex-sync push -n
+  cpull --no-delete
+  cpush -ic
+  codex-sync inspect
+EOF
 }
 assist_missing_ignore() {
 	local suggested=$local_dir git_root='' answer='' physical_root
@@ -117,7 +167,7 @@ case $1 in
 	exit 0
 	;;
 --version)
-	printf 'codex-sync %s\n' "$VERSION"
+	printf 'codex-sync %s\n' "$(version_text)"
 	exit 0
 	;;
 push | pull | inspect)
@@ -126,30 +176,52 @@ push | pull | inspect)
 	;;
 *) fail "Expected push, pull or inspect (see --help)" ;;
 esac
-dry_run=false
-delete=true
+dry_run=false delete=true force=false cleanup=false interactive=false
+quiet=false verbose=false color_enabled=true
+progress=auto
+# Expand composable short flags without changing left-to-right option handling.
+expanded=()
 for arg in "$@"; do
+	if [[ $arg == -?* && $arg != --* ]]; then
+		for ((j = 1; j < ${#arg}; j++)); do expanded+=("-${arg:j:1}"); done
+	else expanded+=("$arg"); fi
+done
+for arg in "${expanded[@]}"; do
 	case $arg in
-	--help)
+	--help | -h)
 		usage
 		exit 0
 		;;
 	--version)
-		printf 'codex-sync %s\n' "$VERSION"
+		printf 'codex-sync %s\n' "$(version_text)"
 		exit 0
 		;;
-	--dry-run)
+	--no-color) color_enabled=false ;;
+	*)
 		[[ $command != inspect ]] || fail "Unsupported option for inspect: $arg"
-		dry_run=true
+		case $arg in
+		--dry-run | -n) dry_run=true ;;
+		--no-delete) delete=false ;;
+		--force | -f) force=true ;;
+		--cleanup | -c) cleanup=true ;;
+		--interactive | -i) interactive=true ;;
+		--progress | -p) progress=yes ;;
+		--no-progress) progress=no ;;
+		--quiet | -q)
+			quiet=true
+			verbose=false
+			;;
+		--verbose | -v)
+			verbose=true
+			quiet=false
+			;;
+		--*) fail "Unknown option: $arg" ;;
+		*) fail "Unexpected argument: $arg (run from the project directory)" ;;
+		esac
 		;;
-	--no-delete)
-		[[ $command != inspect ]] || fail "Unsupported option for inspect: $arg"
-		delete=false
-		;;
-	--*) fail "Unknown option: $arg" ;;
-	*) fail "Unexpected argument: $arg (run from the project directory)" ;;
 	esac
 done
+if $cleanup && ! $delete; then fail '--cleanup requires deletion; cannot combine with --no-delete'; fi
 config=${XDG_CONFIG_HOME:-$HOME/.config}/codex-sync
 local_dir=$(pwd -P) || fail 'Cannot resolve local project'
 # Walk physical local parents only; an invalid nearest entry must not be skipped.
@@ -200,7 +272,7 @@ done
 # Validation and source selection above are shared with both transfer directions.
 if [[ $command == inspect ]]; then
 	bold='' reset='' red=''
-	if [[ -t 1 && ! ${NO_COLOR+x} ]]; then
+	if [[ -t 1 && ! ${NO_COLOR+x} && ${color_enabled:-true} == true ]]; then
 		bold=$'\033[1m' reset=$'\033[0m' red=$'\033[31m'
 	fi
 	printf '%sSync root:%s %s\n%sBuilt-in:%s\n' "$bold" "$reset" "$(display_path "$local_dir")" "$bold" "$reset"
@@ -214,6 +286,29 @@ if [[ $command == inspect ]]; then
 	printf '%sLocal:%s %s\n' "$bold" "$reset" "$(display_path "$project_ignore")"
 	display_patterns "$project_ignore"
 	exit 0
+fi
+# Cleanup uses rsync's receiver deletion engine, never shell path deletion.
+# Protect built-ins and global rules even when project exclusions are deleted.
+if $cleanup; then
+	cleanup_filters=()
+	for pattern in "${builtin_patterns[@]}"; do cleanup_filters+=("--filter=P $pattern"); done
+	if ! $no_global && [[ -f $config/ignore ]]; then
+		while IFS= read -r pattern || [[ -n $pattern ]]; do
+			pattern=${pattern%$'\r'}
+			case $pattern in '' | $'\r' | \#* | \;*) continue ;; esac
+			case $pattern in '+ '* | '- '* | *../*) fail 'Cleanup requires plain exclusion patterns without parent traversal in active ignore files' ;; esac
+			cleanup_filters+=("--filter=P $pattern")
+		done <"$config/ignore"
+	fi
+	while IFS= read -r pattern || [[ -n $pattern ]]; do
+		pattern=${pattern%$'\r'}
+		case $pattern in '' | $'\r' | \#* | \;*) continue ;; esac
+		case $pattern in '+ '* | '- '* | *../*) fail 'Cleanup requires plain exclusion patterns without parent traversal in active ignore files' ;; esac
+	done < <(project_patterns "$project_ignore")
+	excludes=("${cleanup_filters[@]}" "${excludes[@]}")
+fi
+if $interactive && ! $dry_run; then
+	[[ -t 0 && -t 2 ]] || fail 'Interactive sync requires terminal stdin and stderr; no synchronization performed'
 fi
 host=codex
 optional_file "$config/target-host"
@@ -257,15 +352,91 @@ else
 	source=$remote_path
 	destination=$local_path
 fi
-options=(-av)
-if $delete; then
-	options+=(--delete)
-	if ! $dry_run; then diagnostic 33 '⚠️ Sync will delete destination-only files.'; fi
+run_rsync() {
+	if $no_global; then
+		project_patterns "$project_ignore" | rsync "$@" "${excludes[@]}" -- "$source" "$destination"
+	else
+		rsync "$@" "${excludes[@]}" -- "$source" "$destination"
+	fi
+}
+options=(-a)
+if $delete; then options+=(--delete); fi
+if $cleanup; then options+=(--delete-excluded); fi
+if ! $force; then
+	# Count only regular-file transfer records; no filenames or human skip text
+	# are parsed. Identical read-only probes differ solely by --update.
+	before=$(run_rsync -a --dry-run --out-format='%i') || fail 'Newer-file comparison failed'
+	after=$(run_rsync -a --dry-run --update --out-format='%i') || fail 'Newer-file comparison failed'
+	before_count=0 after_count=0
+	while IFS= read -r record; do
+		if [[ $record == [\<\>]f????????? ]]; then before_count=$((before_count + 1)); fi
+	done <<<"$before"
+	while IFS= read -r record; do
+		if [[ $record == [\<\>]f????????? ]]; then after_count=$((after_count + 1)); fi
+	done <<<"$after"
+	skipped=$((before_count - after_count))
+	if ((skipped > 0)); then diagnostic 33 "⚠️ $skipped newer destination file(s) skipped in comparison; use --force to overwrite. Files may change after this check."; fi
+	options+=(--update)
 fi
-if $dry_run; then options+=(--dry-run); fi
-printf 'ℹ️ %s: %s -> %s\n' "$command" "$source" "$destination"
-if $no_global; then
-	project_patterns "$project_ignore" | rsync "${options[@]}" "${excludes[@]}" -- "$source" "$destination"
-else
-	rsync "${options[@]}" "${excludes[@]}" -- "$source" "$destination"
+if $verbose; then options+=(-v); fi
+if $quiet; then options+=(--quiet); fi
+if ! $quiet && { [[ $progress == yes ]] || { [[ $progress == auto && -t 1 ]] && ! $verbose; }; }; then
+	options+=(--info=progress2)
 fi
+if ! $quiet; then printf 'ℹ️ %s: %s -> %s\n' "$command" "$source" "$destination"; fi
+# Keep preview options independent of transfer verbosity and progress. Rsync's
+# default escaped %n representation makes every name one printable record,
+# including embedded newlines and literal backslash-octal-looking names. Never
+# decode it or split paths on whitespace; %i has a fixed eleven-byte width.
+preview_options=(-a)
+if $delete; then preview_options+=(--delete); fi
+if $cleanup; then preview_options+=(--delete-excluded); fi
+if ! $force; then preview_options+=(--update); fi
+preview=$(LC_ALL=C run_rsync "${preview_options[@]}" --dry-run --itemize-changes '--out-format=%i|%n') || fail 'Preview failed; no synchronization performed'
+if ! $quiet || $interactive; then
+	added=0 modified=0 deleted=0
+	green='' red='' yellow='' reset=''
+	if [[ -t 1 && ! ${NO_COLOR+x} && $color_enabled == true ]]; then
+		green=$'\033[32m' red=$'\033[31m' yellow=$'\033[33m' reset=$'\033[0m'
+	fi
+	while IFS= read -r record; do
+		[[ -n $record ]] || continue
+		if [[ ${#record} -lt 12 || ${record:11:1} != '|' ]]; then
+			# Rsync can report protected, nonempty cleanup directories on stdout.
+			printf '%s\n' "$record" >&2
+			continue
+		fi
+		item=${record:0:11}
+		path=${record:12}
+		if $verbose; then printf '%s\n' "$record"; fi
+		if [[ $item == '*deleting  ' ]]; then
+			sign=-
+			color=$red
+			deleted=$((deleted + 1))
+		elif [[ ${item:2} == '+++++++++' ]]; then
+			sign=+
+			color=$green
+			added=$((added + 1))
+		elif [[ ${item:1:1} == d ]]; then
+			# Existing-directory timestamps/permissions are archive metadata noise.
+			continue
+		else
+			sign='~'
+			color=$yellow
+			modified=$((modified + 1))
+		fi
+		if ! $verbose; then printf '%s%s%s %s\n' "$color" "$sign" "$reset" "$path"; fi
+	done <<<"$preview"
+	printf 'Preview: %d added, %d modified, %d deleted\n' "$added" "$modified" "$deleted"
+fi
+if $dry_run; then exit 0; fi
+if $interactive; then
+	[[ -t 0 && -t 2 ]] || fail 'Interactive sync requires terminal stdin and stderr; no synchronization performed'
+	printf '⚠️ Apply this preview%s? [y/N] ' "$(if $cleanup; then printf ' including ignored destination cleanup'; fi)" >&2
+	answer=''
+	if ! IFS= read -r answer; then answer=''; fi
+	case $answer in y | Y | yes | YES | Yes) ;; *) fail 'Synchronization declined' ;; esac
+fi
+if $delete; then diagnostic 33 '⚠️ Sync will delete destination-only files.'; fi
+if $cleanup; then diagnostic 33 '⚠️ Cleanup also deletes destination entries matching project ignore rules (built-in and global protections remain).'; fi
+run_rsync "${options[@]}"

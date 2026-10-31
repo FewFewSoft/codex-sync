@@ -4,7 +4,7 @@ set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/helpers.sh"
 cd "$tmp/work/demo"
 run push
-[[ $(cat "$tmp/out") == "ℹ️ push: $tmp/work/demo/ -> codex:~/demo/" ]]
+[[ $(cat "$tmp/out") == "ℹ️ push: $tmp/work/demo/ -> codex:~/demo/"$'\nPreview: 0 added, 0 modified, 0 deleted' ]]
 has "$tmp/work/demo/"
 has 'codex:~/demo/'
 has --delete

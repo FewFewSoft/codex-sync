@@ -2,14 +2,20 @@ name: Release installer
 
 on:
   push:
-    # GitHub tag filters are globs; validate the exact syntax below.
-    tags: ['*']
+    tags: ['[0-9]*.[0-9]*.[0-9]*']
 
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  build:
+    uses: ./.github/workflows/build-installer.yml
   release:
+    needs: build
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -17,81 +23,23 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
-
       - name: Validate release version
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          numeric_version='(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
-          [[ $RELEASE_TAG =~ ^${numeric_version}$ ]] || {
-            echo 'Release tags must be exactly X.Y.Z (no v prefix or leading zeros).' >&2
-            exit 1
-          }
-          # Read the constant as data, never source or evaluate application code.
-          mapfile -t definitions < <(grep -E '(^|[^[:alnum:]_])VERSION[[:space:]]*=' bin/codex-sync)
-          [[ ${#definitions[@]} == 1 ]] || {
-            echo 'Expected exactly one unambiguous VERSION definition.' >&2
-            exit 1
-          }
-          [[ ${definitions[0]} =~ ^readonly\ VERSION=(${numeric_version})$ ]] || {
-            echo 'Expected a literal numeric readonly VERSION constant.' >&2
-            exit 1
-          }
-          [[ ${BASH_REMATCH[1]} == "$RELEASE_TAG" ]] || {
-            echo 'Release tag does not match bin/codex-sync VERSION.' >&2
-            exit 1
-          }
-
-      - name: Fetch Makeself 2.5.0
-        uses: actions/checkout@v4
+        run: bash scripts/release-version.sh "$RELEASE_TAG"
+      - uses: actions/download-artifact@v8
         with:
-          repository: megastep/makeself
-          ref: release-2.5.0
-          path: .release-tools/makeself
-          persist-credentials: false
-
-      - name: Build and validate installer
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          path: dist
+      - name: Validate and publish installer
         env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          work=$(mktemp -d)
-          trap 'rm -rf -- "$work"' EXIT
-          mkdir -p "$work/payload/bin" "$work/home" "$work/config" "$work/tmp" dist
-          # Explicit allowlist: never package the working tree or CI tooling.
-          install -m 755 install.sh uninstall.sh "$work/payload/"
-          install -m 755 bin/codex-sync bin/cpush bin/cpull "$work/payload/bin/"
-          archive="$PWD/dist/codex-sync-$RELEASE_TAG.run"
-          bash .release-tools/makeself/makeself.sh \
-            --header .release-tools/makeself/makeself-header.sh \
-            --gzip "$work/payload" "$archive" "codex-sync $RELEASE_TAG" ./install.sh
-          chmod 755 "$archive"
-          export HOME="$work/home" XDG_CONFIG_HOME="$work/config" TMPDIR="$work/tmp"
-          bash "$archive" --check
-          bash "$archive" --noexec --target "$work/extracted"
-          diff -r "$work/payload" "$work/extracted"
-          # Exercise the archive's actual startup command in an empty HOME.
-          bash "$archive" --nox11
-          for name in codex-sync cpush cpull; do
-            cmp "bin/$name" "$HOME/.local/bin/$name"
-            test -x "$HOME/.local/bin/$name"
-          done
-          [[ $("$HOME/.local/bin/codex-sync" --version) == "codex-sync $RELEASE_TAG" ]]
-          [[ $("$HOME/.local/bin/cpush" --version) == "codex-sync $RELEASE_TAG" ]]
-          [[ $("$HOME/.local/bin/cpull" --version) == "codex-sync $RELEASE_TAG" ]]
-          bash "$work/extracted/uninstall.sh"
-          for name in codex-sync cpush cpull; do
-            test ! -e "$HOME/.local/bin/$name"
-          done
-
-      # Default success gating keeps validation/build failures away from Releases.
-      - name: Publish installer
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ github.ref_name }}
-          files: dist/codex-sync-${{ github.ref_name }}.run
-          fail_on_unmatched_files: true
+          COMMIT: ${{ github.sha }}
+          EXPECTED_SHA256: ${{ needs.build.outputs.sha256 }}
+        run: bash scripts/publish-release.sh

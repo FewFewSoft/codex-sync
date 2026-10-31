@@ -8,7 +8,7 @@ Read `specs/001-sync-behavior.md` before implementing or changing functionality.
 
 Whenever behavior, CLI options, defaults, security or exclusion rules, configuration, or tests change, update the relevant files under `specs/` in the same change so the specifications always describe implemented behavior and current test coverage. Keep `README.md` consistent with the implementation and specifications in that same change.
 
-Keep the scope narrow: do not expand Git use beyond the specified optional marker-creation hint, or add sandbox provisioning, SSH configuration management, a Python runtime, or a general-purpose synchronization framework.
+Keep the scope narrow: do not expand Git use beyond the specified optional marker-creation hint and best-effort version metadata, or add sandbox provisioning, SSH configuration management, a Python runtime, or a general-purpose synchronization framework.
 
 ## Structure and conventions
 
