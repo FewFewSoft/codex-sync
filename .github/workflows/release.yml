@@ -17,7 +17,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -47,7 +47,7 @@ jobs:
           }
 
       - name: Fetch Makeself 2.5.0
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: megastep/makeself
           ref: release-2.5.0
