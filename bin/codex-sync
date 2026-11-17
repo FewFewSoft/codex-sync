@@ -4,7 +4,7 @@ set -euo pipefail
 
 # Read as literal release data by packaging, not used as a runtime fallback.
 # shellcheck disable=SC2034
-readonly VERSION=1.2.0
+readonly VERSION=1.3.0
 readonly BUILD_METADATA=''
 
 version_text() {
