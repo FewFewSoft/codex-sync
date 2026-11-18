@@ -6,7 +6,7 @@ Maintain a small Bash utility for bidirectional project-directory synchronizatio
 
 Read `specs/001-sync-behavior.md` before implementing or changing functionality. The specification is authoritative for CLI behavior, configuration, exclusions, deletion, and installation. If a requirement is unclear or conflicts with implementation constraints, report it rather than silently inventing behavior.
 
-Whenever behavior, CLI options, defaults, security or exclusion rules, configuration, or tests change, update the relevant files under `specs/` in the same change so the specifications always describe implemented behavior and current test coverage. Keep `README.md` consistent with the implementation and specifications in that same change.
+Whenever behavior, CLI options, defaults, security or exclusion rules, configuration, or tests change, update the relevant files under `specs/` in the same change so the specifications always describe implemented behavior and current test coverage. Record any needed user-documentation changes in `docs/SCRATCHPAD.md`; do not update official documentation as a side effect of implementation.
 
 Keep the scope narrow: do not expand Git use beyond the specified optional marker-creation hint and best-effort version metadata, or add sandbox provisioning, SSH configuration management, a Python runtime, or a general-purpose synchronization framework.
 
@@ -32,10 +32,14 @@ Write self-contained Bash tests under `tests/`, mocking SSH/rsync where possible
 
 Before reporting completion, run `bash -n`, shfmt checks, ShellCheck (when available), and tests. State which checks passed or could not run.
 
-## Documentation audiences
+## Documentation
 
-README.md is for end users only: what the tool does, requirements, installation, concise usage and configuration examples, `.codexignore` usage, important deletion and secrets warnings, and useful uninstall guidance. Do not include license discussion, how-to-develop guidance, agent instructions, testing commentary, architecture internals, or implementation notes.
+Keep `README.md` concise as the end-user entry point: purpose, requirements, installation, essential usage and configuration, `.codexignore`, important deletion and secrets warnings, and uninstall guidance. Put extended user-facing guidance in `docs/` only when it warrants a separate page. Keep detailed behavioral contracts and edge cases in `specs/`, and standing agent/developer rules in `AGENTS.md`. Do not put development instructions, testing commentary, architecture internals, or implementation notes in the README.
 
-Keep durable agent and developer instructions in AGENTS.md. Keep detailed behavioral contracts and edge cases in the authoritative `specs/` files; avoid duplicating them in README.md or AGENTS.md. Keep the user-facing facts and safety notices in README.md consistent with those contracts.
+Do not modify `README.md` or other official user documentation unless explicitly requested. During implementation, record potential documentation additions, corrections, or removals in `docs/SCRATCHPAD.md` instead. Keep observations concise and contextual; create the file only when needed. Review them separately when requested, then clear or delete the file. The scratchpad is temporary, not a journal or backlog. Maintain the accuracy of official user documentation through these dedicated reviews.
+
+## Language policy
+
+Use the user's language for conversation, specifications, and reports. Use English by default for code, comments, documentation, logs, and CLI output unless explicitly requested otherwise. Specify UI language per project; never infer it from the user's language or source code.
 
 Do not initialize Git unless explicitly requested. Preserve unrelated user changes and report deviations from the specification.
